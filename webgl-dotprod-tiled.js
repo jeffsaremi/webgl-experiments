@@ -21,29 +21,25 @@ async function runDotProdTiled(gl, texA, texB, texAWidth, textAHeight, texBWidth
     return texture2D(texture, coords);
   }
 
-  float _2by2DotProd(sampler2D left, sampler2D right, ivec2 leftCoords, ivec2 rightCoords) {
-    float sum = 0.0;
-    sum += texel(left, leftCoords, leftWH[0], leftWH[1]).r            * texel(right, rightCoords, rightWH[0], rightWH[1]).r;
-    sum += texel(left, leftCoords+ivec2(1,0), leftWH[0], leftWH[1]).r * texel(right, rightCoords+ivec2(1,0), rightWH[0], rightWH[1]).r;
-    sum += texel(left, leftCoords+ivec2(0,1), leftWH[0], leftWH[1]).r * texel(right, rightCoords+ivec2(0,1), rightWH[0], rightWH[1]).r;
-    sum += texel(left, leftCoords+ivec2(1,1), leftWH[0], leftWH[1]).r * texel(right, rightCoords+ivec2(1,1), rightWH[0], rightWH[1]).r;
-    return sum;
-  }
+  // float _2by2DotProd(sampler2D left, sampler2D right, ivec2 leftCoords, ivec2 rightCoords) {
+  //   float sum = 0.0;
+  //   sum += texel(left, leftCoords, leftWH[0], leftWH[1]).r            * texel(right, rightCoords, rightWH[0], rightWH[1]).r;
+  //   sum += texel(left, leftCoords+ivec2(1,0), leftWH[0], leftWH[1]).r * texel(right, rightCoords+ivec2(1,0), rightWH[0], rightWH[1]).r;
+  //   sum += texel(left, leftCoords+ivec2(0,1), leftWH[0], leftWH[1]).r * texel(right, rightCoords+ivec2(0,1), rightWH[0], rightWH[1]).r;
+  //   sum += texel(left, leftCoords+ivec2(1,1), leftWH[0], leftWH[1]).r * texel(right, rightCoords+ivec2(1,1), rightWH[0], rightWH[1]).r;
+  //   return sum;
+  // }
   float tileDotProd(sampler2D left, sampler2D right, int leftBandIndex, int rightBandIndex, int tileIndex) {
     ivec2 lcoords = ivec2(tileIndex, leftBandIndex) * ivec2(tileLength, tileLength);
     ivec2 rcoords = ivec2(tileIndex, rightBandIndex) * ivec2(tileLength, tileLength);
-    // float sum = 0.0;
-    // for(int i=0; i < tileLength/2; i += 2) {
-    //   lcoords += ivec2(i*2, 0);
-    //   rcoords += ivec2(0, i*2);
-    //   for(int j=0; j < tileLength/2; j += 2) {
-    //     lcoords += ivec2(0, j*2);
-    //     rcoords += ivec2(j*2, 0);
-    //     sum += _2by2DotProd(left, right, lcoords, rcoords);
-    //   }
-    // }
-    // return sum;
-    return _2by2DotProd(left, right, lcoords, rcoords);
+    float sum = 0.0;
+    for(int i=0; i < tileLength; ++i) {
+      for(int j=0; j < tileLength; ++j) {
+        sum += texel(left, lcoords + ivec2(i,j), leftWH[0], leftWH[1]).r * 
+               texel(right, rcoords + ivec2(i,j), rightWH[0], rightWH[1]).r;
+      }
+    }
+    return sum;
   }
   float bandDotProd(sampler2D left, sampler2D right, int leftBandIndex, int rightBandIndex) {
     const int tileCount = sharedDim / (tileLength*tileLength);
@@ -163,7 +159,7 @@ async function runStraightCopyProgram(gl, inputTexture, outputTexture, width, he
 
 function getTestData() {
   return [
-    { a:[3,8], b:[4,8]},
+    //{ a:[3,8], b:[4,8]},
     { a:[56*56,64], b:[64,64]},
     { a:[56*56,64], b:[256,64]},
     { a:[7*7,256], b:[64,256]},
@@ -191,25 +187,25 @@ async function main() {
     const shapeB = testData.b;
     console.info(`Running dotProduct for [${shapeA.toString()}]-[${shapeB.toString()}]`);
 
-    const tileLength = 2;
+    const tileLength = 4;
 
     const a = createRandomArray(shapeA[0] * shapeA[1]);
-    const texA = createStorage(gl, gl.R32F, gl.RED, gl.FLOAT, shapeA[1], shapeA[0], a);
+    const texA = createTexture(gl, gl.R32F, gl.RED, gl.FLOAT, shapeA[1], shapeA[0], a);
     // const texCopyA = createTexture(gl, gl.R32F, gl.RED, gl.FLOAT, shapeA[1], shapeA[0], null);
     // await runStraightCopyProgram(gl, texA, texCopyA, shapeA[1], shapeA[0]);
     //debugPrintTexture(gl, texA, shapeA[1], shapeA[0], gl.RED, gl.FLOAT);
 
     const [tiledWidthA, tiledHeightA] = [Math.ceil(shapeA[1]/tileLength), shapeA[0]*tileLength];
-    const tiledTexA = createStorage(gl, gl.R32F, gl.RED, gl.FLOAT, tiledWidthA, tiledHeightA, null);
+    const tiledTexA = createTexture(gl, gl.R32F, gl.RED, gl.FLOAT, tiledWidthA, tiledHeightA, null);
     console.time('tiledUpA');
     await runTileUpProgram(gl, texA, tiledTexA, shapeA[1], shapeA[0], tileLength, tiledWidthA, tiledHeightA);
     console.timeEnd('tiledUpA');
     //debugPrintTexture(gl, tiledTexA, tiledWidthA, tiledHeightA, gl.RED, gl.FLOAT);
 
     const b = createRandomArray(shapeB[0] * shapeB[1]);
-    const texB = createStorage(gl, gl.R32F, gl.RED, gl.FLOAT, shapeB[1], shapeB[0], b);
+    const texB = createTexture(gl, gl.R32F, gl.RED, gl.FLOAT, shapeB[1], shapeB[0], b);
     const [tiledWidthB, tiledHeightB] = [Math.ceil(shapeB[1]/tileLength), shapeB[0]*tileLength];
-    const tiledTexB = createStorage(gl, gl.R32F, gl.RED, gl.FLOAT, tiledWidthB, tiledHeightB, null);
+    const tiledTexB = createTexture(gl, gl.R32F, gl.RED, gl.FLOAT, tiledWidthB, tiledHeightB, null);
     console.time('tiledUpB');
     await runTileUpProgram(gl, texB, tiledTexB, shapeB[1], shapeB[0], tileLength, tiledWidthB, tiledHeightB);
     console.timeEnd('tiledUpB');
@@ -218,7 +214,7 @@ async function main() {
     const width = shapeB[0];
     const height = shapeA[0];
     const c = new Float32Array(width * height);
-    const texC = createStorage(gl, gl.R32F, gl.RED, gl.FLOAT, width, height, null);
+    const texC = createTexture(gl, gl.R32F, gl.RED, gl.FLOAT, width, height, null);
 
     console.time('tiledDotProd');
     await runDotProdTiled(gl, tiledTexA, tiledTexB, tiledWidthA, tiledHeightA, tiledWidthB, tiledHeightB, width, height, sharedDim, tileLength, texC);

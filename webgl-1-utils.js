@@ -422,34 +422,41 @@ function texel(buffer, xy, width, height) {
   const offset = xy[1] * width + xy[0];
   return buffer[offset];
 }
-function sim2by2DotProd(leftBuffer, rightBuffer, leftCoords, rightCoords, leftWidth, leftHeight, rightWidth, rightHeight) {
-  let sum = 0.0;
-  // console.log(`leftBuffer: 
-  // ${leftCoords},
-  // ${[leftCoords[0] + 1, leftCoords[1]]},
-  // ${[leftCoords[0], leftCoords[1] + 1]},
-  // ${[leftCoords[0] + 1, leftCoords[1] + 1]}
-  // `);
-  // console.log(`rightBuffer: 
-  // ${rightCoords},
-  // ${[rightCoords[0] + 1, rightCoords[1]]},
-  // ${[rightCoords[0], rightCoords[1] + 1]},
-  // ${[rightCoords[0] + 1, rightCoords[1] + 1]}
-  // `);
-  sum += texel(leftBuffer, leftCoords, leftWidth, leftHeight)            
-      * texel(rightBuffer, rightCoords, rightWidth, rightHeight);
-  sum += texel(leftBuffer, [leftCoords[0] + 1, leftCoords[1]], leftWidth, leftHeight) 
-      * texel(rightBuffer, [rightCoords[0] + 1, rightCoords[1]], rightWidth, rightHeight);
-  sum += texel(leftBuffer, [leftCoords[0], leftCoords[1] + 1], leftWidth, leftHeight) 
-      * texel(rightBuffer, [rightCoords[0], rightCoords[1] + 1], rightWidth, rightHeight);
-  sum += texel(leftBuffer, [leftCoords[0] + 1, leftCoords[1] + 1], leftWidth, leftHeight) 
-      * texel(rightBuffer, [rightCoords[0] + 1, rightCoords[1] + 1], rightWidth, rightHeight);
-  return sum;
-}
+// function sim2by2DotProd(leftBuffer, rightBuffer, leftCoords, rightCoords, leftWidth, leftHeight, rightWidth, rightHeight) {
+//   let sum = 0.0;
+//   // console.log(`leftBuffer: 
+//   // ${leftCoords},
+//   // ${[leftCoords[0] + 1, leftCoords[1]]},
+//   // ${[leftCoords[0], leftCoords[1] + 1]},
+//   // ${[leftCoords[0] + 1, leftCoords[1] + 1]}
+//   // `);
+//   // console.log(`rightBuffer: 
+//   // ${rightCoords},
+//   // ${[rightCoords[0] + 1, rightCoords[1]]},
+//   // ${[rightCoords[0], rightCoords[1] + 1]},
+//   // ${[rightCoords[0] + 1, rightCoords[1] + 1]}
+//   // `);
+//   sum += texel(leftBuffer, leftCoords, leftWidth, leftHeight)            
+//       * texel(rightBuffer, rightCoords, rightWidth, rightHeight);
+//   sum += texel(leftBuffer, [leftCoords[0] + 1, leftCoords[1]], leftWidth, leftHeight) 
+//       * texel(rightBuffer, [rightCoords[0] + 1, rightCoords[1]], rightWidth, rightHeight);
+//   sum += texel(leftBuffer, [leftCoords[0], leftCoords[1] + 1], leftWidth, leftHeight) 
+//       * texel(rightBuffer, [rightCoords[0], rightCoords[1] + 1], rightWidth, rightHeight);
+//   sum += texel(leftBuffer, [leftCoords[0] + 1, leftCoords[1] + 1], leftWidth, leftHeight) 
+//       * texel(rightBuffer, [rightCoords[0] + 1, rightCoords[1] + 1], rightWidth, rightHeight);
+//   return sum;
+// }
 function simTileDotProd(leftBuffer, leftWidth, leftHeight, rightBuffer, rightWidth, rightHeight, leftIndex, rightIndex, sharedDim, tileLength, tileIndex) {
   const lcoords = [tileIndex * tileLength, leftIndex * tileLength];
   const rcoords = [tileIndex * tileLength, rightIndex * tileLength];
-  return sim2by2DotProd(leftBuffer, rightBuffer, lcoords, rcoords, leftWidth, leftHeight, rightWidth, rightHeight);
+  let sum = 0.0;
+  for(let j =0; j < tileLength; ++j) {
+    for(let i =0; i < tileLength; ++i) {
+      sum += texel(leftBuffer, [lcoords[0]+i, lcoords[1]+j], leftWidth, leftHeight) * 
+             texel(rightBuffer, [rcoords[0]+i, rcoords[1]+j], rightWidth, rightHeight);
+    }
+  }
+  return sum;
 }
 function simBandDotProd(leftBuffer, leftWidth, leftHeight, rightBuffer, rightWidth, rightHeight, sharedDim, tileLength, leftIndex, rightIndex) {
   if(tileLength === 0) {
