@@ -1,4 +1,4 @@
-function createMatmulProgram(gl, sharedDim) {
+function createMatmulRowBlocksProgram(gl, sharedDim) {
   const fragmentShaderSource = `#version 300 es
   precision highp float;
   in vec2 TexCoord;
@@ -8,34 +8,33 @@ function createMatmulProgram(gl, sharedDim) {
   uniform sampler2D B;
   uniform int width;
   uniform int height;
+  uniform int hOffset;
 
   void main()
   {
-    float sum = 0.0;
     ivec2 xy = ivec2(TexCoord * vec2(width, height)); // rescale
-    // loop over the shared dim
-    for(int k=0; k < ${sharedDim}; ++k) {
-      float a = texelFetch(A, ivec2(k, xy.y), 0).r;
+    float sum = 0.0;
+    for(int k = 0; k < ${sharedDim}; ++k) {
+      float a = texelFetch(A, ivec2(k, xy.y+hOffset), 0).r;
       float b = texelFetch(B, ivec2(xy.x, k), 0).r;
-      sum += a * b;
+      sum += a*b;
     }
     TexelValue = vec4(sum);
   }`;
 
   return createProgram(gl, getDefaultVertexShader(gl),
-    compileShader(gl, fragmentShaderSource, gl.FRAGMENT_SHADER));
+  compileShader(gl, fragmentShaderSource, gl.FRAGMENT_SHADER));
 }
-async function runMatMul(gl, program, texA, texB, width, height, texC) {
-
+async function runMatmulRowblocks(gl, program, texA, texB, width, height, texC, blockSize) {
   const handleA = gl.getUniformLocation(program, 'A');
   const handleB = gl.getUniformLocation(program, 'B');
   const hWidth = gl.getUniformLocation(program, 'width');
   const hHeight = gl.getUniformLocation(program, 'height');
+  const hHOffset = gl.getUniformLocation(program, 'hOffset');
 
   gl.useProgram(program);
 
   attachOutputTexture(gl, texC);
-  gl.viewport(0, 0, width, height);
 
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texA);
@@ -46,9 +45,15 @@ async function runMatMul(gl, program, texA, texB, width, height, texC) {
   gl.uniform1i(handleB, 1);
 
   gl.uniform1i(hWidth, width);
-  gl.uniform1i(hHeight, height);
+  for(let row = 0; row < height; row+=blockSize) {
+    const rowCount = Math.min(blockSize, height-row);
+    
+    gl.uniform1i(hHeight, rowCount);
+    gl.uniform1i(hHOffset, row);
+    gl.viewport(0, row, width, rowCount);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
 
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   await waitForSync(gl);
 };
 
@@ -70,18 +75,26 @@ function simTexelFetch(array, x, y, width) {
   const offset = y * width + x;
   return array[offset];
 }
-function simMatmul(a, aw, ah, b, bw, bh, sharedDim, width, height) {
+function simFragShader(a, aw, ah, b, bw, bh, sharedDim, i, j) {
+  let sum = 0.0;
+  for(let k=0; k < sharedDim; ++k) {
+    const aval = simTexelFetch(a, k, j, aw);
+    const bval = simTexelFetch(b, i, k, bw);
+    sum += aval * bval;
+  }
+  return sum;
+}
+function simMatmulRowBlock(a, aw, ah, b, bw, bh, sharedDim, width, height, blockSize) {
   const newBuffer = new Float32Array(width*height);
-  for(let j = 0; j < height; ++j) {
-    for(let i = 0; i < width; ++i) {
-      let sum = 0.0;
-      for(let k=0; k < sharedDim; ++k) {
-        const aval = simTexelFetch(a, k, j, aw);
-        const bval = simTexelFetch(b, i, k, bw);
-        sum += aval * bval;
+  
+  for(let row = 0; row < height; row+=blockSize) {
+    const rowCount = Math.min(blockSize, height-row);
+    for(let j = row; j < row+rowCount; ++j) {
+      for(let i = 0; i < width; ++i) {
+        const sum = simFragShader(a,aw,ah, b, bw, bh, sharedDim, i, j);
+        const newOffset = j*width + i;
+        newBuffer[newOffset] = sum;
       }
-      const newOffset = j*width + i;
-      newBuffer[newOffset] = sum;
     }
   }
   return newBuffer;
@@ -126,23 +139,28 @@ async function main() {
     const texA = createTexture(gl, gl.R32F, gl.RED, gl.FLOAT, shapeA[1], shapeA[0], a);
     const texB = createTexture(gl, gl.R32F, gl.RED, gl.FLOAT, shapeB[1], shapeB[0], b);
     const texC = createTexture(gl, gl.R32F, gl.RED, gl.FLOAT, width, height, null);
-    const program = createMatmulProgram(gl, sharedDim);
+    const program = createMatmulRowBlocksProgram(gl, sharedDim);
 
-    console.time('matmul');
-    await runMatMul(gl, program, texA, texB, width, height, texC);
-    console.timeEnd('matmul');
-    console.time('readpixels');
-    readOutput(gl, width, height, gl.RED, gl.FLOAT, c);
-    console.timeEnd('readpixels');
-    cpuMatMul(a, shapeA, b, shapeB, expected);
-    if(!compareOutputs(c, expected, 0.1)) {
-      console.error('Expected and Actual did not match');
-      console.log(c);
-      console.log(expected);
-      // const simulated = simMatmul(a, shapeA[1], shapeA[0], b, shapeB[1], shapeB[0], sharedDim, width, height);
-      // console.log('Simulated Result:', simulated);
-    } else {
-      console.info('Actual and expected matched!');
+    const blockSizes = [2, 4, 8, 16, 32, 64];
+    for(let j = 0; j < blockSizes.length; ++j) {
+      const blockSize = blockSizes[j];
+      console.log(`matmul-rowblock size: ${blockSize}`);
+      console.time('matmul-rowblock');
+      await runMatmulRowblocks(gl, program, texA, texB, width, height, texC, blockSize);
+      console.timeEnd('matmul-rowblock');
+      console.time('readpixels');
+      readOutput(gl, width, height, gl.RED, gl.FLOAT, c);
+      console.timeEnd('readpixels');
+      cpuMatMul(a, shapeA, b, shapeB, expected);
+      if(!compareOutputs(c, expected, 0.1)) {
+        console.error('Expected and Actual did not match');
+        console.log(c);
+        console.log(expected);
+        // const d = simMatmulRowBlock(a, shapeA[1], shapeA[0], b, shapeB[1], shapeB[0], sharedDim, width, height, blockSize);
+        // console.log('simulated result:', d);
+      } else {
+        console.info('Actual and expected matched!');
+      }
     }
     gl.deleteTexture(texA);
     gl.deleteTexture(texB);
